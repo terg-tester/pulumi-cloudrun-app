@@ -1,0 +1,9 @@
+config:
+  gcp:region: europe-west1
+  pulumi-cloudrun-app:appPath: app
+  pulumi-cloudrun-app:concurrency: "50"
+  pulumi-cloudrun-app:containerPort: "8080"
+  pulumi-cloudrun-app:cpu: "1"
+  pulumi-cloudrun-app:memory: 1Gi
+  gcp:project: pulumi-464709
+  pulumi-cloudrun-app:customMessage: Pozdrav Vlado, ovo je poruka iz Pulumi Cloud Runa!
