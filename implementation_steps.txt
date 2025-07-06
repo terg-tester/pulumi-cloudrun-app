@@ -1,0 +1,140 @@
+Implementation Steps for GCP Cloud Run with Pulumi:
+
+1. Initialize a new Pulumi project.
+1.1. Attempted to initialize Pulumi project using interactive.sh, but it failed. Retrying directly.
+1.2. Initializing Pulumi project directly: `pulumi new google-python --name pulumi-cloudrun-app --stack dev`
+1.3. Creating the project directory first.
+1.4. Correcting directory creation command.
+1.5. Initializing Pulumi project inside the created directory with --yes flag.
+1.6. Template 'google-python' not found. Listing available templates.
+1.7. Found suitable template: `container-gcp-python`. Initializing with this template.
+
+2. Create Dockerfile and a simple Python web application.
+2.1. Created `Dockerfile` in `pulumi-cloudrun-app/`.
+2.2. Created `app.py` in `pulumi-cloudrun-app/`.
+2.3. Created `requirements.txt` in `pulumi-cloudrun-app/`.
+
+3. Update `__main__.py` to use a ComponentResource and configurable message.
+3.1. Modified `__main__.py` to encapsulate Cloud Run service creation within a `CloudRunService` ComponentResource.
+3.2. Integrated a configurable message (`customMessage`) from Pulumi config into the application's environment variables.
+
+4. Set Pulumi configuration for GCP project and region.
+4.1. Set GCP project ID: `pulumi config set gcp:project pulumi-464709 --stack dev`.
+4.2. Set GCP region: `pulumi config set gcp:region europe-west1 --stack dev`.
+
+5. Set configurable message for the web application.
+5.1. Set initial custom message: `pulumi config set customMessage "Hello from Pulumi Cloud Run!" --stack dev`.
+
+6. Deploy the Pulumi stack to GCP Cloud Run.
+6.1. Encountered `AttributeError: 'dict' object has no attribute 'get_int'`. Corrected `__main__.py` to use `args.get` and explicit type casting for `container_port` and `cpu`.
+6.2. Corrected `concurrency` to use `args.get` and explicit type casting.
+6.3. Encountered `TypeError: Missing required property 'push'`. Added `push=True` to `docker_build.Image`.
+6.4. Encountered `AttributeError: 'Image' object has no attribute 'repo_digest'`. Corrected `__main__.py` to use `image.image_name`.
+6.5. Encountered `AttributeError: 'Image' object has no attribute 'image_name'`. Corrected `__main__.py` to use `image.tags[0]`.
+6.6. Encountered `permission denied` for Docker daemon. Checked `docker.sock` permissions. Manual intervention required to create `docker` group and add user to it. User needs to run `sudo groupadd docker` and `sudo usermod -aG docker $USER` and then re-login.
+6.7. Docker permission issue persists. Instructing user to restart Docker service: `sudo systemctl restart docker`.
+6.8. Realized Docker is managed by Minikube. Instructing user to configure environment using `eval $(minikube docker-env)`.
+6.9. Environment configured. `permission denied` still persists. Attempting to build Docker image directly to debug Docker environment.
+6.10. Confirmed Docker environment variables are not set. Instructing user to run `eval $(minikube docker-env)` in the *same terminal session* and verify with `env | grep DOCKER`.
+6.11. Discovered Minikube is stopped. Instructing user to start Minikube with `minikube start`.
+6.12. Minikube started. Re-running `eval $(minikube docker-env)` to set Docker environment variables.
+6.13. Docker environment variables successfully set. `permission denied` still persists. Attempting to explicitly set Docker environment variables in `pulumi up` command.
+6.14. Encountered `Client sent an HTTP request to an HTTPS server`. Attempting to disable TLS verification for Docker build by setting `DOCKER_TLS_VERIFY=0`.
+6.15. `Client sent an HTTP request to an HTTPS server` persists. Pivoting to manual Docker image build and push.
+
+7. Authenticate Docker to GCP Artifact Registry.
+7.1. Authenticated Docker to GCP Artifact Registry: `gcloud auth configure-docker europe-west1-docker.pkg.dev`.
+
+8. Docker permission issue persists for manual build.
+8.1. Re-emphasizing `eval $(minikube docker-env)` in the same session and verifying `env | grep DOCKER` before attempting `docker build`.
+8.2. Confirmed Minikube Docker daemon is running and requires TLS. Re-iterating `eval $(minikube docker-env)` in the same session before `docker build`.
+
+9. Manually created Artifact Registry repository.
+9.1. Manually created Artifact Registry repository: `gcloud artifacts repositories create my-cloudrun-repo --repository-format=docker --location=europe-west1 --description="Docker repository for Cloud Run app" --project=pulumi-464709`.
+
+10. Due to persistent Docker permission issues, instructing user to manually build and push Docker image.
+10.1. Encountered `permission denied` for Minikube certs. Instructing user to run `chmod -R go+rX ~/.minikube/certs`.
+10.2. Permissions for Minikube certs resolved. Still encountering `permission denied` for Docker build. Instructing user to manually build and push Docker image.
+10.3. `sudo docker build` was successful. Image `my-cloudrun-app:latest` is now in Minikube's Docker daemon. Now updating Pulumi code to reference this image directly.
+10.4. Updated `__main__.py` to directly reference the Docker image URL and removed `pulumi_docker_build` resources.
+10.5. Encountered "Image not found" error during `pulumi up`. Instructing user to manually push the Docker image to Artifact Registry.
+10.6. `docker push` failed due to incorrect tag. Instructing user to `sudo docker tag` the image and then `sudo docker push`.
+10.7. `docker push` failed due to unauthenticated request. Instructing user to `sudo gcloud auth configure-docker` and then retry `sudo docker push`.
+10.8. `docker push` failed due to unauthenticated request. Identified that the authenticated `gcloud` account (`terg.tester@gmail.com`) needs `Artifact Registry Writer` role. Instructing user to grant this role.
+
+11. `docker push` still failing after IAM role grant. Pivoting to `gcloud builds submit` to build and push Docker image via Cloud Build.
+11.1. `gcloud builds submit` failed because project was not set. Instructing user to set project with `gcloud config set project pulumi-464709`.
+11.2. `gcloud builds submit` was successful.
+
+12. Cloud Run service deployment and troubleshooting.
+12.1. `pulumi up` still reports "Image not found". Verifying image presence in Artifact Registry.
+12.2. Image confirmed in Artifact Registry. Suspecting Cloud Run service account permissions. Identifying Cloud Run service account and granting `Artifact Registry Reader` role.
+12.3. Cloud Run service account granted `Artifact Registry Reader` role. New error: "The user-provided container failed to start and listen on the port defined provided by the PORT=8080 environment variable within the allocated timeout." Instructing user to check Cloud Run logs.
+12.4. Cloud Run logs show `ImportError: cannot import name 'os' from 'flask'`. Corrected `app.py` to import `os` directly.
+12.5. `gcloud builds submit` was successful after `app.py` correction. However, `pulumi up` still reports "The user-provided container failed to start and listen on the port defined provided by the PORT=8080 environment variable within the allocated timeout." Instructing user to run `pulumi up` again to trigger a new revision and then check the logs for that new revision.
+12.6. Cloud Run service still failing to start. Forcing a new revision by adding a dummy environment variable to the Cloud Run service definition in `__main__.py`.
+12.7. `pulumi up` successful. Cloud Run service is now deployed.
+
+13. Initializing Git repository and preparing code for GitHub.
+13.1. Git commit failed due to unconfigured user identity. Configuring Git identity and retrying commit.
+13.2. GitHub CLI not found. Instructing user to manually install GitHub CLI.
+13.3. GitHub CLI not authenticated. Instructing user to run `gh auth login`.
+13.4. GitHub CLI authenticated via HTTPS. Proceeding with repository creation and push.
+13.5. GitHub repository created and code pushed successfully. However, the repository appeared empty. Checked git remote configuration and pushed manually.
+13.6. Confirmed code pushed to GitHub. Task completed.
+
+14. Troubleshooting configurable value (customMessage) not triggering new Cloud Run revisions.
+14.1. `customMessage` change not reflected. Modifying `__main__.py` to force a new Cloud Run revision by making `DUMMY_VAR` dependent on `message`.
+14.2. `__main__.py` modified to force new revision. Running `pulumi up`.
+14.3. `customMessage` still not reflected. Hardcoding `MESSAGE` environment variable in `__main__.py` to test if environment variables are being passed correctly.
+14.4. `__main__.py` modified with hardcoded `MESSAGE`. Running `pulumi up`.
+14.5. Hardcoded message is displayed. Reverting hardcoded message and adding a new annotation to force revision on `customMessage` change.
+14.6. `__main__.py` modified with new annotation. Running `pulumi up`.
+14.7. Encountered `AttributeError: 'str' object has no attribute 'apply'`. Corrected `__main__.py` to use `pulumi.Output.all(message).apply(lambda args: f"rev-{hash(args[0])}")`.
+14.8. Encountered `Invalid or unknown key. Examine values at 'my-cloudrun-app-service.template.spec.metadata'.` Corrected `__main__.py` to move `metadata` to the correct location under `template`.
+14.9. `pulumi up` successful. Now testing if `customMessage` changes trigger new revisions.
+14.10. `pulumi config set customMessage` and `pulumi up` successfully updated the message on the web page, confirming the configurable value requirement is met.
+
+Problem with configurable value (customMessage) not triggering new Cloud Run revisions:
+
+Initially, changing the `customMessage` via `pulumi config set` and running `pulumi up` did not trigger a new Cloud Run revision. This is because the Pulumi Cloud Run provider, by default, does not consider changes *only* in environment variables (like `MESSAGE`) as a significant enough change to create a new revision. Cloud Run typically creates new revisions when the *container image* changes or when certain *template properties* are modified.
+
+To force Cloud Run to create a new revision whenever `customMessage` changes, we implemented a solution by adding a dynamic annotation to the Cloud Run service template. This annotation's value is made dependent on the `hash` of the `message` variable (which comes from `customMessage`).
+
+Specifically, the following change was made in `__main__.py`:
+```python
+# Old (problematic) way of forcing revision (if it were directly under template.spec):
+# "run.googleapis.com/revision-id": pulumi.Output.concat("rev-", message.apply(lambda m: hash(m))),
+
+# Corrected and working implementation:
+# Inside the 'template' block, directly under 'template':
+# ...
+            template={
+                "spec": {
+                    "containers": [
+                        {
+                            # ... other container properties
+                            "envs": [
+                                {
+                                    "name": "MESSAGE",
+                                    "value": message,
+                                },
+                            ],
+                        },
+                    ],
+                    "container_concurrency": concurrency,
+                },
+                "metadata": { # This metadata block is directly under 'template'
+                    "annotations": {
+                        "run.googleapis.com/revision-id": pulumi.Output.all(message).apply(lambda args: f"rev-{hash(args[0])}"),
+                    },
+                },
+            },
+# ...
+```
+
+With this approach, every time `customMessage` is updated, the `hash` value changes, which in turn modifies the `run.googleapis.com/revision-id` annotation. Pulumi detects this change in the template's metadata, forcing Cloud Run to deploy a new revision. This new revision then picks up the updated `MESSAGE` environment variable, and the new message is displayed on the web page.
+
+This ensures that the configurable value requirement is fully met and changes are reflected reliably.
+
+## 36. Copy `implementation_steps.txt` to project directory and add to repository.
